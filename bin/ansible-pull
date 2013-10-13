@@ -70,6 +70,13 @@ def try_playbook(path):
         return 2
     return 0
 
+def clean_directory(path):
+    os.chdir('/')
+    try:
+        shutil.rmtree(path)
+    except Exception, e:
+        print >>sys.stderr, "Failed to remove %s: %s" % (path, str(e))
+
 
 def select_playbook(path, args):
     playbook = None
@@ -130,7 +137,7 @@ def main(args):
     if not options.dest:
         print >>sys.stderr, "No directory given, using temporary location"
         options.dest = tempfile.mkdtemp(prefix='ansible-pull')
-        options.purge = True
+        atexist.register(clean_directory, options.dest)
 
     options.dest = os.path.abspath(options.dest)
 
@@ -173,11 +180,7 @@ def main(args):
     rc, out = _run(cmd)
 
     if options.purge:
-        os.chdir('/')
-        try:
-            shutil.rmtree(options.dest)
-        except Exception, e:
-            print >>sys.stderr, "Failed to remove %s: %s" % (options.dest, str(e))
+        clean_directory(options.dest)
 
     return rc
 
