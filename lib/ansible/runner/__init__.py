@@ -193,7 +193,10 @@ class Runner(object):
             # 'smart' is the default since 1.2.1/1.3
             cmd = subprocess.Popen(['ssh','-o','ControlPersist'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (out, err) = cmd.communicate() 
-            if "Bad configuration option" in err:
+            # "unknown configuration option" is for sun ssh
+            # "bad configuration option" is openssh
+            if "Bad configuration option" in err or \
+               "unknown configuration option" in err:
                 self.transport = "paramiko"
             else:
                 self.transport = "ssh" 
