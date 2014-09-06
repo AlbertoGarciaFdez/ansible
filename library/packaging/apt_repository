@@ -63,6 +63,13 @@ options:
         required: false
         default: 'yes'
         choices: ['yes', 'no']
+    filename:
+        version_added: '1.8'
+        description:
+            - If set, the repository will use this file name instead of a auto generated one. This is mostly
+              not needed most of the time. If omitted, a automated name based on url is used.
+        required: false
+        default: ''
 author: Alexander Saltanov
 version_added: "0.7"
 requirements: [ python-apt ]
@@ -391,6 +398,7 @@ def main():
             # this should not be needed, but exists as a failsafe
             install_python_apt=dict(required=False, default="yes", type='bool'),
             validate_certs = dict(default='yes', type='bool'),
+            filename=dict(required=False, default=None),
         ),
         supports_check_mode=True,
     )
@@ -419,7 +427,7 @@ def main():
 
     try:
         if state == 'present':
-            sourceslist.add_source(repo)
+            sourceslist.add_source(repo, file=module.params['filename'])
         elif state == 'absent':
             sourceslist.remove_source(repo)
     except InvalidSource, err:
