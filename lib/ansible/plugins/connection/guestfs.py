@@ -83,6 +83,31 @@ class Connection(ConnectionBase):
 
         self.guestfs.add_drive_opts(self.disk)
 
+    def _find_python(self):
+        ''' find what python to use '''
+        self._python = None
+        for p in ('python', 'python3'):
+            python_version = self.guestfs.sh('%s --version' % p)
+            if re.match(python_version, '^Python \d.\d+\.\d+$'):
+                self._python = p
+                break
+
+        if self._python is None:
+            raise AnsibleError("No python found on the image, aborting")
+
+     def _mount_tmp(self)
+        ''' mount a tmpfs over /tmp or /run to store various artefacts '''
+        self._tmp = None
+        for tmp in ('/run', '/tmp'):
+            if self.guestfs.is_dir(tmp):
+                self.guestfs.sh("mount -t tmpfs -o size=4M tmpfs %s" % tmp)
+                self._tmp = tmp
+                break
+
+        if self._tmp is None:
+            raise AnsibleError("Cannot mount tmpfs, aborting")
+
+
     def _connect(self):
         ''' connect to the chroot; nothing to do here '''
         super(Connection, self)._connect()
@@ -110,28 +135,11 @@ class Connection(ConnectionBase):
                 except RuntimeError as msg:
                     print("%s (ignored)" % msg)
 
-            self._tmp = None
-
-            for tmp in ('/run', '/tmp'):
-                if self.guestfs.is_dir(tmp):
-                    self.guestfs.sh("mount -t tmpfs -o size=4M tmpfs %s" % tmp)
-                    self._tmp = tmp
-                    break
-            if self._tmp is None:
-                raise AnsibleError("Cannot mount tmpfs, aborting")
-
+            self._mount_tmp()
+            self._find_python()
             self.guestfs.write(self._script_name(), EXECUTION_SCRIPT)
 
-            self._python = None
-            for p in ('python', 'python3'):
-                python_version = self.guestfs.sh('%s --version' % p)
-                if re.match(python_version, '^Python \d.\d+\.\d+$'):
-                    self._python = p
-                    break
 
-            if self._python is None:
-                raise AnsibleError("No python found on the image, aborting")
- 
             self._connected = True
 
     # TODO randomize the filename ?
