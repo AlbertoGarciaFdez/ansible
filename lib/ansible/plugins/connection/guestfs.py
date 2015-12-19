@@ -24,6 +24,7 @@ import os
 import os.path
 import guestfs
 import json
+import re
 
 from ansible import constants as C
 from ansible.errors import AnsibleError
@@ -53,8 +54,8 @@ r = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
 
 output = {
     "rc": r.returncode,
-    "stdout": str(stdout),
-    "stderr": str(stderr),
+    "stdout": stdout.decode('UTF-8'),
+    "stderr": stderr.decode('UTF-8'),
 }
 json.dump(output, open(cmd_file + ".out","w"))
 """
@@ -117,6 +118,12 @@ class Connection(ConnectionBase):
                     break
             #TODO make sure that at least one did succeed
             self.guestfs.write(self._script_name(), EXECUTION_SCRIPT)
+            for p in ('python', 'python3'):
+                python_version = self.guestfs.sh('%s --version' % p)
+                # check for error message
+                if re.match(python_version, '^Python \d.\d+\.\d+$'):
+                    break
+            self._python = p
             self._connected = True
 
     # TODO randomize the filename ?
@@ -136,8 +143,9 @@ class Connection(ConnectionBase):
                                              sudoable=sudoable)
 
         self.guestfs.write(self._cmd_name(), json.dumps(cmd))
-        result = self.guestfs.sh('python %s %s' % (self._script_name(),
-                                                   self._cmd_name()))
+        result = self.guestfs.sh('%s %s %s' % (self._python,
+                                               self._script_name(),
+                                               self._cmd_name()))
         if result:
             print(result)
             #TODO abort ?
