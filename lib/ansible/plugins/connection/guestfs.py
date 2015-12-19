@@ -37,6 +37,8 @@ except ImportError:
     display = Display()
 
 BUFSIZE = 65536
+
+# keep that code python2 and python3 compliant
 EXECUTION_SCRIPT = """
 import sys
 import json
@@ -65,11 +67,8 @@ class Connection(ConnectionBase):
     ''' Libguestfs based connections '''
 
     transport = 'guestfs'
+    # TODO check for this ?
     has_pipelining = True
-    # su currently has an undiagnosed issue with calculating the file
-    # checksums (so copy, for instance, doesn't work right)
-    # Have to look into that before re-enabling this
-    become_methods = frozenset(C.BECOME_METHODS).difference(('su',))
 
     def __init__(self, play_context, new_stdin, *args, **kwargs):
         super(Connection, self).__init__(play_context, new_stdin,
@@ -95,6 +94,7 @@ class Connection(ConnectionBase):
             # code taken from the manpages
             roots = self.guestfs.inspect_os()
             if len(roots) != 1:
+                # TODO handle the case a bit better ?
                 raise AnsibleError("%s has more than one OS,"
                                    "aborting" % self.disk)
 
@@ -110,35 +110,43 @@ class Connection(ConnectionBase):
                 except RuntimeError as msg:
                     print("%s (ignored)" % msg)
 
-            #TODO add some verification
+            self._tmp = None
+
             for tmp in ('/run', '/tmp'):
                 if self.guestfs.is_dir(tmp):
                     self.guestfs.sh("mount -t tmpfs -o size=4M tmpfs %s" % tmp)
-                    self.tmp = tmp
+                    self._tmp = tmp
                     break
-            #TODO make sure that at least one did succeed
+            if self._tmp is None:
+                raise AnsibleError("Cannot mount tmpfs, aborting")
+
             self.guestfs.write(self._script_name(), EXECUTION_SCRIPT)
+
+            self._python = None
             for p in ('python', 'python3'):
                 python_version = self.guestfs.sh('%s --version' % p)
-                # check for error message
                 if re.match(python_version, '^Python \d.\d+\.\d+$'):
+                    self._python = p
                     break
-            self._python = p
+
+            if self._python is None:
+                raise AnsibleError("No python found on the image, aborting")
+ 
             self._connected = True
 
     # TODO randomize the filename ?
     def _script_name(self):
-        return '%s/script' % self.tmp
+        return '%s/script' % self._tmp
 
     def _cmd_name(self):
-        return '%s/cmd' % self.tmp
+        return '%s/cmd' % self._tmp
 
     def _cmd_result_name(self):
-        return '%s/cmd.out' % self.tmp
+        return '%s/cmd.out' % self._tmp
 
     def exec_command(self, cmd, in_data=None, sudoable=False):
         #TODO handle sudo ?
-        ''' run a command on the chroot '''
+        ''' run a command on the image '''
         super(Connection, self).exec_command(cmd, in_data=in_data,
                                              sudoable=sudoable)
 
@@ -154,13 +162,13 @@ class Connection(ConnectionBase):
         return (r['rc'], r['stdout'], r['stderr'])
 
     def put_file(self, in_path, out_path):
-        ''' transfer a file from local to chroot '''
+        ''' transfer a file from local to the image '''
         super(Connection, self).put_file(in_path, out_path)
         display.vvv("PUT %s TO %s" % (in_path, out_path), host=self.disk)
         self.guestfs.upload(in_path, out_path)
 
     def fetch_file(self, in_path, out_path):
-        ''' fetch a file from chroot to local '''
+        ''' fetch a file from the image to local '''
         super(Connection, self).fetch_file(in_path, out_path)
         display.vvv("FETCH %s TO %s" % (in_path, out_path), host=self.chroot)
         self.guestfs.download(in_path, out_path)
