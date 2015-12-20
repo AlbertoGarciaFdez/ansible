@@ -26,7 +26,6 @@ import guestfs
 import json
 import re
 
-from ansible import constants as C
 from ansible.errors import AnsibleError
 from ansible.plugins.connection import ConnectionBase
 
@@ -35,8 +34,6 @@ try:
 except ImportError:
     from ansible.utils.display import Display
     display = Display()
-
-BUFSIZE = 65536
 
 # keep that code python2 and python3 compliant
 EXECUTION_SCRIPT = """
@@ -67,8 +64,8 @@ class Connection(ConnectionBase):
     ''' Libguestfs based connections '''
 
     transport = 'guestfs'
-    # TODO check for this ?
-    has_pipelining = True
+    # not sure how it would react, so better disable it
+    has_pipelining = False
 
     def __init__(self, play_context, new_stdin, *args, **kwargs):
         super(Connection, self).__init__(play_context, new_stdin,
@@ -77,7 +74,7 @@ class Connection(ConnectionBase):
         self.disk = self._play_context.remote_addr
 
         if not os.path.isfile(self.disk):
-            raise AnsibleError("%s is not a file" % self.disk)
+            raise AnsibleError("%s is not a file, aborting" % self.disk)
 
         self.guestfs = guestfs.GuestFS(python_return_dict=True)
 
@@ -95,7 +92,7 @@ class Connection(ConnectionBase):
         if self._python is None:
             raise AnsibleError("No python found on the image, aborting")
 
-     def _mount_tmp(self)
+    def _mount_tmp(self):
         ''' mount a tmpfs over /tmp or /run to store various artefacts '''
         self._tmp = None
         for tmp in ('/run', '/tmp'):
@@ -107,49 +104,60 @@ class Connection(ConnectionBase):
         if self._tmp is None:
             raise AnsibleError("Cannot mount tmpfs, aborting")
 
+    def _enable_selinux(self):
+        ''' check if we can load a policy and load it '''
+        # man pages indicate this may not work on older system, not sure
+        #how old they have to be
+        if self.guestfs.is_file('/usr/sbin/load_policy'):
+            self.guestfs.sh('/usr/sbin/load_policy')
+
+    def _start_guestfs(self):
+        ''' start the guestfs appliance '''
+        self.guestfs.set_network(True)
+        self.guestfs.set_selinux(True)
+        self.guestfs.launch()
+        # code taken from the manpages
+        roots = self.guestfs.inspect_os()
+        if len(roots) != 1:
+            # TODO handle the case a bit better ?
+            raise AnsibleError("%s has more than one OS,"
+                               "aborting" % self.disk)
+
+        mps = self.guestfs.inspect_get_mountpoints(roots[0])
+
+        def compare(a, b):
+            return len(a) - len(b)
+
+        for device in sorted(mps.keys(), compare):
+            try:
+                self.guestfs.mount(mps[device], device)
+            except RuntimeError as msg:
+                print("%s (ignored)" % msg)
+        self._enable_selinux()
 
     def _connect(self):
-        ''' connect to the chroot; nothing to do here '''
+        ''' connect to the disk image '''
         super(Connection, self)._connect()
         if not self._connected:
-
-            self.guestfs.set_network(True)
-            self.guestfs.launch()
-            #   set_selinux ?
-            # code taken from the manpages
-            roots = self.guestfs.inspect_os()
-            if len(roots) != 1:
-                # TODO handle the case a bit better ?
-                raise AnsibleError("%s has more than one OS,"
-                                   "aborting" % self.disk)
-
-            root = roots[0]
-            mps = self.guestfs.inspect_get_mountpoints(root)
-
-            def compare(a, b):
-                return len(a) - len(b)
-
-            for device in sorted(mps.keys(), compare):
-                try:
-                    self.guestfs.mount(mps[device], device)
-                except RuntimeError as msg:
-                    print("%s (ignored)" % msg)
-
+            self._start_guestfs()
             self._mount_tmp()
             self._find_python()
             self.guestfs.write(self._script_name(), EXECUTION_SCRIPT)
 
-
             self._connected = True
 
-    # TODO randomize the filename ?
+    # no need to randomize the filename since that's on a controlled
+    # tmpfs, with a offline system
     def _script_name(self):
+        ''' return the filename for the execution script '''
         return '%s/script' % self._tmp
 
     def _cmd_name(self):
+        ''' return the filename for the command to execute '''
         return '%s/cmd' % self._tmp
 
     def _cmd_result_name(self):
+        ''' return the filename for the command output '''
         return '%s/cmd.out' % self._tmp
 
     def exec_command(self, cmd, in_data=None, sudoable=False):
@@ -164,9 +172,10 @@ class Connection(ConnectionBase):
                                                self._cmd_name()))
         if result:
             print(result)
-            #TODO abort ?
+            raise AnsibleError("Execution error on the guest: %s" % result)
+
         r = json.loads(self.guestfs.read_file(self._cmd_result_name()))
-        # TODO remove the result file
+        self.guestfs.rm(self._cmd_result_name())
         return (r['rc'], r['stdout'], r['stderr'])
 
     def put_file(self, in_path, out_path):
@@ -184,7 +193,8 @@ class Connection(ConnectionBase):
     def close(self):
         ''' terminate the connection; nothing to do here '''
         super(Connection, self).close()
-        self.guestfish.umount_all()
-        #TODO something else ?
-        # stop the VM ?
+        # not sure if all is needed
+        self.guestfs.shutdown()
+        self.guestfs.umount_all()
+        self.guestfs.close()
         self._connected = False
