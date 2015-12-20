@@ -36,11 +36,17 @@ except ImportError:
     display = Display()
 
 # keep that code python2 and python3 compliant
+# we need to set $HOME so we are not left with
+# .ansible directory on /
+# also, I kept it {} free for clarity, hence the use of
+# disct instead of the short form with brackets.
 EXECUTION_SCRIPT = """
 import sys
 import json
 import os
 from subprocess import PIPE, Popen
+
+os.environ['HOME'] = '{}'
 
 cmd_file = sys.argv[1]
 if not os.path.exists(cmd_file):
@@ -49,14 +55,14 @@ if not os.path.exists(cmd_file):
 cmd = json.loads(open(cmd_file).read())
 
 r = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
-(stdout, stderr) =  r.communicate()
+(stdout, stderr) = r.communicate()
 
-output = {
-    "rc": r.returncode,
-    "stdout": stdout.decode('UTF-8'),
-    "stderr": stderr.decode('UTF-8'),
-}
-json.dump(output, open(cmd_file + ".out","w"))
+output = dict()
+output['rc'] = r.returncode
+output['stdout'] = stdout.decode('UTF-8')
+output['stderr'] = stderr.decode('UTF-8')
+
+json.dump(output, open(cmd_file + '.out', 'w'))
 """
 
 
@@ -84,8 +90,12 @@ class Connection(ConnectionBase):
         ''' find what python to use '''
         self._python = None
         for p in ('python', 'python3'):
-            python_version = self.guestfs.sh('%s --version' % p)
-            if re.match(python_version, '^Python \d.\d+\.\d+$'):
+            try:
+                python_version = self.guestfs.sh('%s --version' % p)
+            except RuntimeError:
+                python_version = ''
+
+            if re.match('^Python \d.\d+\.\d+$', python_version):
                 self._python = p
                 break
 
@@ -142,7 +152,7 @@ class Connection(ConnectionBase):
             self._start_guestfs()
             self._mount_tmp()
             self._find_python()
-            self.guestfs.write(self._script_name(), EXECUTION_SCRIPT)
+            self.guestfs.write(self._script_name(), EXECUTION_SCRIPT.format(self._tmp))
 
             self._connected = True
 
@@ -167,6 +177,7 @@ class Connection(ConnectionBase):
                                              sudoable=sudoable)
 
         self.guestfs.write(self._cmd_name(), json.dumps(cmd))
+        display.vvv("EXECUTING RPC WITH %s" % (self._python), host=self.disk)
         result = self.guestfs.sh('%s %s %s' % (self._python,
                                                self._script_name(),
                                                self._cmd_name()))
@@ -187,7 +198,7 @@ class Connection(ConnectionBase):
     def fetch_file(self, in_path, out_path):
         ''' fetch a file from the image to local '''
         super(Connection, self).fetch_file(in_path, out_path)
-        display.vvv("FETCH %s TO %s" % (in_path, out_path), host=self.chroot)
+        display.vvv("FETCH %s TO %s" % (in_path, out_path), host=self.disk)
         self.guestfs.download(in_path, out_path)
 
     def close(self):
