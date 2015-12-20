@@ -91,13 +91,11 @@ class Connection(ConnectionBase):
         self._python = None
         for p in ('python', 'python3'):
             try:
-                python_version = self.guestfs.sh('%s --version' % p)
-            except RuntimeError:
-                python_version = ''
-
-            if re.match('^Python \d.\d+\.\d+$', python_version):
+                python_version = self.guestfs.sh('%s -V' % p)
                 self._python = p
                 break
+            except RuntimeError,e:
+                pass
 
         if self._python is None:
             raise AnsibleError("No python found on the image, aborting")
