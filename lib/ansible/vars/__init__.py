@@ -170,9 +170,7 @@ class VariableManager:
 
         return data
 
-    # FIXME: include_hostvars is no longer used, and should be removed, but
-    #        all other areas of code calling get_vars need to be fixed too
-    def get_vars(self, loader, play=None, host=None, task=None, include_hostvars=True, include_delegate_to=True, use_cache=True):
+    def get_vars(self, loader, play=None, host=None, task=None, include_delegate_to=True, use_cache=True):
         '''
         Returns the variables, with optional "context" given via the parameters
         for the play, host, and task (which could possibly result in different
@@ -204,7 +202,6 @@ class VariableManager:
             play=play,
             host=host,
             task=task,
-            include_hostvars=include_hostvars,
             include_delegate_to=include_delegate_to,
         )
 
@@ -352,7 +349,7 @@ class VariableManager:
         if hostvars_cache_entry in HOSTVARS_CACHE:
             del HOSTVARS_CACHE[hostvars_cache_entry]
 
-    def _get_magic_variables(self, loader, play, host, task, include_hostvars, include_delegate_to):
+    def _get_magic_variables(self, loader, play, host, task, include_delegate_to):
         '''
         Returns a dictionary of so-called "magic" variables in Ansible,
         which are special variables we set internally for use.
@@ -476,7 +473,6 @@ class VariableManager:
                 host=delegated_host,
                 task=task,
                 include_delegate_to=False,
-                include_hostvars=False,
             )
 
         return delegated_host_vars
